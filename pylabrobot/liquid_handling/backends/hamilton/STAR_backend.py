@@ -4587,7 +4587,7 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       x_positions=[self.extended_conf["xw"]],  # Tip eject waste X position.
       y_positions=y_positions,
       begin_of_tip_deposit_process=int(self._channel_traversal_height * 10),
-      end_of_tip_deposit_process=1220,
+      end_of_tip_deposit_process=1870, # 187 mm, same as in hamilton_decks.py
       z_position_at_end_of_a_command=3600,
       tip_pattern=[True] * self.num_channels,
       tip_type=4,  # TODO: get from tip types
