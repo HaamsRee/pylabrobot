@@ -1732,9 +1732,11 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       y_pos = container.get_location_wrt(self.deck, x="c", y="c", z="b").y + offset.y
 
       if sequential_probe:
-        # Give the active channel full freedom by parking others, then position only this channel.
-        await self.position_max_free_y_for_n(pipetting_channel_index=channel)
-        await self.move_channel_y(channel=channel, y=y_pos)
+        # # Give the active channel full freedom by parking others, then position only this channel.
+        # await self.position_max_free_y_for_n(pipetting_channel_index=channel)
+        # await self.move_channel_y(channel=channel, y=y_pos)
+        await self.position_channels_in_y_direction({channel: y_pos})
+
       else:
         # Positions are sufficiently spaced; move the set in one go.
         await self.position_channels_in_y_direction(
@@ -1751,6 +1753,9 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
         - tip.fitting_depth
         + 5,
       )
+
+      # TODO: Move z up after probing
+
 
       liquid_levels: List[int] = (await self.request_pip_height_last_lld())["lh"]  # type: ignore
       current_absolute_liquid_heights.append(float(liquid_levels[channel] / 10))
@@ -9239,26 +9244,26 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
 
     if make_space:
       # For the channels to the back of `back_channel`, make sure the space between them is
-      # >=9mm. We start with the channel closest to `back_channel`, and make sure the
-      # channel behind it is at least 9mm, updating if needed. Iterating from the front (closest
-      # to `back_channel`) to the back (channel 0), all channels are put at the correct location.
+      # >=9mm (or as set in backend.channel_y_pitch_mm). We start with the channel closest to `back_channel`,
+      # and make sure the channel behind it is at least channel_y_pitch_mm, updating if needed. Iterating from the
+      # front (closest to `back_channel`) to the back (channel 0), all channels are put at the correct location.
       # This order matters because the channel in front of any channel may have been moved in the
       # previous iteration.
-      # Note that if a channel is already spaced at >=9mm, it is not moved.
+      # Note that if a channel is already spaced at >=channel_y_pitch_mm, it is not moved.
       use_channels = list(ys.keys())
       back_channel = min(use_channels)
       for channel_idx in range(back_channel, 0, -1):
-        if (channel_locations[channel_idx - 1] - channel_locations[channel_idx]) < 9:
-          channel_locations[channel_idx - 1] = channel_locations[channel_idx] + 9
+        if (channel_locations[channel_idx - 1] - channel_locations[channel_idx]) < (self.channel_y_pitch_mm):
+          channel_locations[channel_idx - 1] = channel_locations[channel_idx] + self.channel_y_pitch_mm
 
       # Similarly for the channels to the front of `front_channel`, make sure they are all
-      # spaced >=9mm apart. This time, we iterate from back (closest to `front_channel`)
-      # to the front (lh.backend.num_channels - 1), and put each channel >=9mm before the
+      # spaced >=channel_y_pitch_mm apart. This time, we iterate from back (closest to `front_channel`)
+      # to the front (lh.backend.num_channels - 1), and put each channel >=channel_y_pitch_mm before the
       # one behind it.
       front_channel = max(use_channels)
       for channel_idx in range(front_channel, self.num_channels - 1):
-        if (channel_locations[channel_idx] - channel_locations[channel_idx + 1]) < 9:
-          channel_locations[channel_idx + 1] = channel_locations[channel_idx] - 9
+        if (channel_locations[channel_idx] - channel_locations[channel_idx + 1]) < (self.channel_y_pitch_mm):
+          channel_locations[channel_idx + 1] = channel_locations[channel_idx] - self.channel_y_pitch_mm
 
     # Quick checks before movement.
     if channel_locations[0] > 650:
