@@ -1716,6 +1716,7 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       for resource, offset in zip(containers, resource_offsets)
     ]
 
+    sequential_probe = False
     if len(target_y_positions) > 1:
       min_diff = min(
         abs(a - b)
@@ -1724,19 +1725,21 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
         if i < j
       )
       if min_diff < self.channel_y_pitch_mm - 1e-6:
-        raise ValueError(
-          "Requested liquid-level probing positions are too close for the channel pitch of this "
-          f"instrument. Minimum Y pitch: {self.channel_y_pitch_mm} mm, requested min diff: "
-          f"{round(min_diff, 2)} mm. Probe fewer channels at once, use a plate with larger spacing, "
-          "or configure channel_y_pitch_mm for your hardware."
-        )
+        sequential_probe = True
 
     current_absolute_liquid_heights: List[float] = []
     for channel, container, tip, offset in zip(use_channels, containers, tips, resource_offsets):
       y_pos = container.get_location_wrt(self.deck, x="c", y="c", z="b").y + offset.y
-      # Move this channel into position while allowing the backend to make space as needed for
-      # ordering/spacing constraints between channels.
-      await self.position_channels_in_y_direction({channel: y_pos})
+
+      if sequential_probe:
+        # Give the active channel full freedom by parking others, then position only this channel.
+        await self.position_max_free_y_for_n(pipetting_channel_index=channel)
+        await self.move_channel_y(channel=channel, y=y_pos)
+      else:
+        # Positions are sufficiently spaced; move the set in one go.
+        await self.position_channels_in_y_direction(
+          {channel: y for channel, y in zip(use_channels, target_y_positions)}
+        )
 
       await self.move_z_drive_to_liquid_surface_using_clld(
         channel_idx=channel,
