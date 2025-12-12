@@ -1708,11 +1708,12 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
 
     # TODO: Implement != 9 mm channel spacing in other places
 
-    # move and probe channels sequentially to avoid STAR firmware re-spacing them to 18mm
     current_absolute_liquid_heights: List[float] = []
     for channel, container, tip, offset in zip(use_channels, containers, tips, resource_offsets):
       y_pos = container.get_location_wrt(self.deck, x="c", y="c", z="b").y + offset.y
-      await self.move_channel_y(channel=channel, y=y_pos)
+      # Move this channel into position while allowing the backend to make space as needed for
+      # ordering/spacing constraints between channels.
+      await self.position_channels_in_y_direction({channel: y_pos})
 
       await self.move_z_drive_to_liquid_surface_using_clld(
         channel_idx=channel,
