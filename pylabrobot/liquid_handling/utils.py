@@ -3,7 +3,7 @@ from typing import List
 from pylabrobot.resources.coordinate import Coordinate
 from pylabrobot.resources.resource import Resource
 
-MIN_SPACING_BETWEEN_CHANNELS = 9
+MIN_SPACING_BETWEEN_CHANNELS = 18 # Our config only allows 18 mm spacing
 # minimum spacing between the edge of the container and the center of channel
 MIN_SPACING_EDGE = 1
 
