@@ -1706,36 +1706,27 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       )
     await self.move_channel_x(0, x_pos[0])
 
-    # move channels to above their y positions
-    y_pos = [
-      resource.get_location_wrt(self.deck, x="c", y="c", z="b").y + offset.y
-      for resource, offset in zip(containers, resource_offsets)
-    ]
-    await self.position_channels_in_y_direction(
-      {channel: y for channel, y in zip(use_channels, y_pos)}
-    )
+    # TODO: Implement != 9 mm channel spacing in other places
 
-    # detect liquid heights
-    current_absolute_liquid_heights = await asyncio.gather(
-      *[
-        self.move_z_drive_to_liquid_surface_using_clld(
-          channel_idx=channel,
-          lowest_immers_pos=container.get_absolute_location("c", "c", "cavity_bottom").z
-          + tip.total_tip_length
-          - tip.fitting_depth,
-          start_pos_search=container.get_absolute_location("c", "c", "t").z
-          + tip.total_tip_length
-          - tip.fitting_depth
-          + 5,
-        )
-        for channel, container, tip in zip(use_channels, containers, tips)
-      ]
-    )
+    # move and probe channels sequentially to avoid STAR firmware re-spacing them to 18mm
+    current_absolute_liquid_heights: List[float] = []
+    for channel, container, tip, offset in zip(use_channels, containers, tips, resource_offsets):
+      y_pos = container.get_location_wrt(self.deck, x="c", y="c", z="b").y + offset.y
+      await self.move_channel_y(channel=channel, y=y_pos)
 
-    liquid_levels: List[int] = (await self.request_pip_height_last_lld())["lh"]  # type: ignore
-    current_absolute_liquid_heights = [
-      float(liquid_levels[channel_idx] / 10) for channel_idx in use_channels
-    ]
+      await self.move_z_drive_to_liquid_surface_using_clld(
+        channel_idx=channel,
+        lowest_immers_pos=container.get_absolute_location("c", "c", "cavity_bottom").z
+        + tip.total_tip_length
+        - tip.fitting_depth,
+        start_pos_search=container.get_absolute_location("c", "c", "t").z
+        + tip.total_tip_length
+        - tip.fitting_depth
+        + 5,
+      )
+
+      liquid_levels: List[int] = (await self.request_pip_height_last_lld())["lh"]  # type: ignore
+      current_absolute_liquid_heights.append(float(liquid_levels[channel] / 10))
 
     relative_to_well = [
       current_absolute_liquid_heights[i]
