@@ -1141,6 +1141,7 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
     packet_read_timeout: int = 3,
     read_timeout: int = 30,
     write_timeout: int = 30,
+    channel_y_pitch_mm: float = 9.0,
   ):
     """Create a new STAR interface.
 
@@ -1152,6 +1153,9 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       packet_read_timeout: timeout in seconds for reading a single packet.
       read_timeout: timeout in seconds for reading a full response.
       write_timeout: timeout in seconds for writing a command.
+      channel_y_pitch_mm: Minimum achievable pitch (center-to-center) between pipetting channels
+        in the Y direction, in mm. Default 9.0 mm (standard STAR). Set to 18 for four-channel
+        heads configured on alternating slots, etc.
     """
 
     super().__init__(
@@ -1166,6 +1170,7 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
     self.iswap_installed: Optional[bool] = None
     self.autoload_installed: Optional[bool] = None
     self.core96_head_installed: Optional[bool] = None
+    self.channel_y_pitch_mm = channel_y_pitch_mm
 
     self._iswap_parked: Optional[bool] = None
     self._num_channels: Optional[int] = None
@@ -1706,7 +1711,25 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       )
     await self.move_channel_x(0, x_pos[0])
 
-    # TODO: Implement != 9 mm channel spacing in other places
+    target_y_positions = [
+      resource.get_location_wrt(self.deck, x="c", y="c", z="b").y + offset.y
+      for resource, offset in zip(containers, resource_offsets)
+    ]
+
+    if len(target_y_positions) > 1:
+      min_diff = min(
+        abs(a - b)
+        for i, a in enumerate(target_y_positions)
+        for j, b in enumerate(target_y_positions)
+        if i < j
+      )
+      if min_diff < self.channel_y_pitch_mm - 1e-6:
+        raise ValueError(
+          "Requested liquid-level probing positions are too close for the channel pitch of this "
+          f"instrument. Minimum Y pitch: {self.channel_y_pitch_mm} mm, requested min diff: "
+          f"{round(min_diff, 2)} mm. Probe fewer channels at once, use a plate with larger spacing, "
+          "or configure channel_y_pitch_mm for your hardware."
+        )
 
     current_absolute_liquid_heights: List[float] = []
     for channel, container, tip, offset in zip(use_channels, containers, tips, resource_offsets):
