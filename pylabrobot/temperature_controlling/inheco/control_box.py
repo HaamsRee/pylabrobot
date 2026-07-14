@@ -1,3 +1,4 @@
+import math
 import time
 import typing
 
@@ -81,27 +82,30 @@ class InhecoTECControlBox:
       num -= 1
     return crc
 
-  async def _read_until_end(self, timeout: int) -> str:
+  async def _read_until_end(self, timeout: float) -> bytes:
     """Read until a packet ends with a \\x00 byte. May read multiple packets."""
-    start = time.time()
+    deadline = time.monotonic() + timeout
     response = b""
-    while time.time() - start < timeout:
-      packet = await self.io.read(64, timeout=timeout)
-      if packet is not None and packet != b"":
-        if packet.endswith(b"\x00"):
-          response += packet.rstrip(b"\x00")  # strip trailing \x00's
-          break
-        elif packet.endswith(b"#"):
-          response += packet[:-1]
-          continue
-        else:
-          # I have never seen this happen, commands always end with \x00 or '#'
-          print("weird packet, please report", packet)
-          response += packet
+    while True:
+      remaining = deadline - time.monotonic()
+      if remaining <= 0:
+        raise TimeoutError("Timeout while waiting for response from device.")
 
-    return response.decode("unicode_escape")
+      packet = await self.io.read(8, timeout=max(1, math.ceil(remaining * 1000)))
+      if packet is None or packet == b"":
+        continue
+      if packet.endswith(b"\x00"):
+        response += packet.rstrip(b"\x00")  # strip trailing \x00's
+        return response
+      if packet.endswith(b"#"):
+        response += packet[:-1]
+        continue
 
-  async def _read_response(self, command: str, timeout: int = 60) -> str:
+      # I have never seen this happen, commands always end with \x00 or '#'
+      print("weird packet, please report", packet)
+      response += packet
+
+  async def _read_response(self, command: str, timeout: float = 60) -> bytes:
     """Read the response for a given command.
 
     "The MTC/STC replies to the first four characters of every command with a modified echo. The
@@ -110,27 +114,38 @@ class InhecoTECControlBox:
     increase integrity of the communication."
     """
 
-    start = time.time()
-    while time.time() - start < timeout:
-      response = await self._read_until_end(timeout=int(timeout - (time.time() - start)))
+    deadline = time.monotonic() + timeout
+    expected_prefix = command[:4].lower().encode("ascii")
+    while True:
+      remaining = deadline - time.monotonic()
+      if remaining <= 0:
+        raise TimeoutError("Timeout while waiting for response from device.")
 
-      if response[:4] == command[:4].lower():
+      response = await self._read_until_end(timeout=remaining)
+
+      if response[:4] == expected_prefix:
         return response
 
-    raise TimeoutError("Timeout while waiting for response from device.")
-
-  async def send_command(self, command: str, timeout: int = 3):
+  async def send_command(self, command: str, timeout: float = 3):
     """Send a command to the device and return the response"""
     packets = self._generate_packets(command)
-    for packet in packets:
-      await self.io.write(bytes(packet[1:]), report_id=bytes(packet[0]))
+    for attempt in range(2):
+      for packet in packets:
+        await self.io.write(bytes(packet[1:]), report_id=bytes([packet[0]]))
 
-    response = await self._read_response(command, timeout=timeout)
+      response = await self._read_response(command, timeout=timeout)
+      status = response[4]
 
-    if response[4] != "0":
-      raise RuntimeError(f"Error response from device: {response}")
+      if status == ord("6") and attempt == 0:
+        continue
+      if status != ord("0"):
+        raise RuntimeError(f"Error response from device: {response}")
 
-    return response[5:-1]  # cut off command, error status, and final checksum byte
+      # Cut off command, error status, and final checksum byte. The checksum is binary, so only
+      # decode the textual payload.
+      return response[5:-1].decode("ascii")
+
+    raise AssertionError("unreachable")
 
   async def set_touchscreen(self, active: bool):
     await self.send_command(f"0ADD{1 if active else 0}")
