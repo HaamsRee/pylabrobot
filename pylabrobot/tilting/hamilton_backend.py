@@ -58,7 +58,9 @@ class HamiltonTiltModuleBackend(TilterBackend):
 
     await self.io.write(f"99{command}{parameter}\r\n".encode("utf-8"))
     resp = ""
-    while not resp.startswith("T1" + command):
+    while len(resp) < 4 or resp[2:4] != command:
+      # The first two characters are the module name configured with the MN command. It is not
+      # necessarily "T1"; factory or installation-specific names such as "00" are valid.
       resp = (await self.io.read(128)).decode("utf-8")
 
     # Check for error.
